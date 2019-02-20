@@ -4,38 +4,39 @@ using System.Immutable;
 namespace With.Tests {
 
   public class Employee : IImmutable {
-    public string EmployeeFirstName { get; }
-    public readonly string EmployeeLastName;
+    public string FirstName { get; }
+    public readonly string LastName;
 
-    public Employee(string employeeFirstName, string employeeLastName) {
-      EmployeeFirstName = employeeFirstName;
-      EmployeeLastName = employeeLastName;
+    public Employee(string firstName, string lastName) {
+      FirstName = firstName;
+      LastName = lastName;
     }
   }
 
   public class Department : IImmutable {
-    public string DepartmentTitle { get; }
+    public string Title { get; }
     public Employee Manager { get; }
     public DateTime Created { get; }
 
     public Department() : this("", new Employee("", "")) { }
-    public Department(string departmentTitle, int manager) : this(departmentTitle, new Employee("", "")) { }
-    public Department(string departmentTitle) : this(departmentTitle, new Employee("", "")) { }
+    public Department(string title, int manager) : this(title, new Employee("", "")) { }
+    public Department(string title) : this(title, new Employee("", "")) { }
 
-    public Department(string departmentTitle, Employee manager) {
-      DepartmentTitle = departmentTitle;
+    // With will choose this ctor 
+    public Department(string title, Employee manager) {
+      Title = title;
       Manager = manager;
       Created = DateTime.Now;
     }
   }
 
   public class Organization : IImmutable {
-    public string OrganizationName { get; }
-    public Department DevelopmentDepartment { get; }
+    public string Name { get; }
+    public Department Sales { get; }
 
-    public Organization(string organizationName, Department developmentDepartment) {
-      OrganizationName = organizationName;
-      DevelopmentDepartment = developmentDepartment;
+    public Organization(string name, Department sales) {
+      Name = name;
+      Sales = sales;
     }
   }
 
@@ -44,17 +45,17 @@ namespace With.Tests {
 
     static void Main(string[] args) {
       var expected = new Organization("Organization", new Department("Development Department", new Employee("John", "Doe")));
-      var actual = expected.With(x => x.DevelopmentDepartment.Manager.EmployeeFirstName, "Foo");
+      var actual = expected.With(x => x.Sales.Manager.FirstName, "Foo");
 
-      Console.WriteLine(expected.DevelopmentDepartment.Manager.EmployeeFirstName);
-      Console.WriteLine(actual.DevelopmentDepartment.Manager.EmployeeFirstName);
+      Console.WriteLine(expected.Sales.Manager.FirstName);
+      Console.WriteLine(actual.Sales.Manager.FirstName);
       Console.WriteLine(Object.ReferenceEquals(expected, actual)); // false
-      Console.WriteLine(Object.ReferenceEquals(expected.DevelopmentDepartment, actual.DevelopmentDepartment)); // false
-      Console.WriteLine(Object.ReferenceEquals(expected.DevelopmentDepartment.Manager, actual.DevelopmentDepartment.Manager)); // false
-      Console.WriteLine(Object.ReferenceEquals(expected.OrganizationName, actual.OrganizationName)); // true
-      Console.WriteLine(Object.ReferenceEquals(expected.DevelopmentDepartment.DepartmentTitle, expected.DevelopmentDepartment.DepartmentTitle)); // true
+      Console.WriteLine(Object.ReferenceEquals(expected.Sales, actual.Sales)); // false
+      Console.WriteLine(Object.ReferenceEquals(expected.Sales.Manager, actual.Sales.Manager)); // false
+      Console.WriteLine(Object.ReferenceEquals(expected.Name, actual.Name)); // true
+      Console.WriteLine(Object.ReferenceEquals(expected.Sales.Title, expected.Sales.Title)); // true
 
-      var actual1 = expected.With(x => x.DevelopmentDepartment.Manager.EmployeeFirstName, "Foo");
+      var actual1 = expected.With(x => x.Sales.Manager.FirstName, "Foo");
       Console.WriteLine(Object.ReferenceEquals(actual, actual1)); // false
 
       Console.ReadKey(true);
