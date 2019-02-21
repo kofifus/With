@@ -1,6 +1,6 @@
 # With
 
-Add a `With` method to objects inheriting from `System.Immutable` that contructs a new 'mutation' of the object with a changed member specified by a lambda expression.
+Add a `With` method to objects inheriting from `System.Immutable` that constructs a new 'mutation' of the object with a changed member specified by a lambda expression.
 
 # Simple Usage
 
