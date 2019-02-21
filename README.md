@@ -108,4 +108,5 @@ class Program {
 
 # Notes
 
-- This project started as a fork of [Remute](ithub.com/ababik/Remute) and credit goes there
+-All reflection is cached with lambda expressions for great efficiency
+- This project started as a fork of [Remute](https://github.com/ababik/Remute) and credit goes there
