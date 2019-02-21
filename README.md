@@ -108,5 +108,5 @@ class Program {
 
 # Notes
 
--All reflection is cached with lambda expressions for great efficiency
+- All reflection is cached with lambda expressions for great efficiency
 - This project started as a fork of [Remute](https://github.com/ababik/Remute) and credit goes there
