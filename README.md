@@ -1,6 +1,6 @@
 # With
 
-Add a `With` method to objects inheriting from `System.Immutable` that constructs a new 'mutation' of the object with a changed member specified by a lambda expression.
+Adds a `With` method to immutable objects that constructs a new 'mutation' of the object with a changed member specified by a lambda expression.
 
 # Simple Usage
 
@@ -25,9 +25,43 @@ var source = new Employee("John", "Doe");
 var mutation = source.With(x => x.FirstName, "Foo");
 ```
 
+# Nested mutations
+
+`With` can set nested members and will only update references in the mutated path
+
+```
+public class Department : IImmutable {
+	public string Title { get; }
+	public Employee Manager { get; }
+
+	public Department(string title, Employee manager) {
+		Title = title;
+		Manager = manager;
+	}
+}
+
+public class Organization : IImmutable {
+	public string Name { get; }
+	public Department Sales { get; }
+
+	public Organization(string name, Department sales) {
+		Name = name;
+		Sales = sales;
+	}
+}
+
+var org = new Organization("Organization", new Department("Development Department", new Employee("John", "Doe")));
+var mutatedOrg = org.With(x => x.Sales.Manager.FirstName, "Foo");
+
+Object.ReferenceEquals(org.Sales.Manager, mutatedOrg.Sales.Manager)); // false
+Object.ReferenceEquals(org.Sales, mutatedOrg.Sales)); // false
+Object.ReferenceEquals(org.Name, mutatedOrg.Name)); // true
+Object.ReferenceEquals(org.Sales.Title, mutatedOrg.Sales.Title)); // true
+```
+
 # Constructor search
 
-`With` will search for a constructor to use for mutation in the following way:
+When a type has multiple constructors, `With` will search for a constructor to use for mutation in the following way:
 
 - If there are no consturctors throw an exception
 - If there are any consturctors with attribute `[WithConstructor]` consider only them
