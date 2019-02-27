@@ -10,7 +10,7 @@ namespace System.Immutable {
   [AttributeUsage(AttributeTargets.Constructor, AllowMultiple = false)]
   public sealed class WithConstructor : Attribute { }
 
-  internal class WithInternal {
+  class WithPrivate {
     delegate object Activator(params object[] args);
     delegate object InstanceDelegate<T>(T src);
 
@@ -20,19 +20,15 @@ namespace System.Immutable {
     //        ie: args => new Employee(args[0] as String, args[1] as String) as Object 
     // ctorParamsResolvers: [ DstType(srcTypeProp1.Name, x => (x as srcType).srcTypeProp1) as Object), ... ]
     //                  ie: [ ( "EmployeeFirstName" , x => ((x as Employee).EmployeeFirstName) as Object) ), ( "EmployeeLastName" , x => ((x as Employee).EmployeeLastName) as Object) ) ]
-    ImmutableDictionary<string, (Activator activator, CtorParamResolver[] ctorParamsResolvers)> ActivationContextCache;
+    ImmutableDictionary<string, (Activator activator, CtorParamResolver[] ctorParamsResolvers)> ActivationContextCache = ImmutableDictionary<string, (Activator activator, CtorParamResolver[] ctorParamsResolvers)>.Empty;
 
     // key: "{srcType.FullName}|{WithMember}"  
     //  ie: "test.Organization|DevelopmentDepartment.Manager"
     // val: x => WithMember as Object  
     //    ie: x => x.DevelopmentDepartment.Manager as Object
-    ImmutableDictionary<string, Delegate> InstanceExpressionCache;
+    ImmutableDictionary<string, Delegate> InstanceExpressionCache = ImmutableDictionary<string, Delegate>.Empty;
 
-    WithInternal() {
-      ActivationContextCache = ImmutableDictionary<string, (Activator activator, CtorParamResolver[] ctorParamsResolvers)>.Empty;
-      InstanceExpressionCache = ImmutableDictionary<string, Delegate>.Empty;
-    }
-    public readonly static WithInternal Default = new WithInternal();
+    public readonly static WithPrivate Default = new WithPrivate();
 
     // Contructs immutable object from existing one with changed member specified by lambda expression.
     public TSrc With<TSrc, TVal>(TSrc src, Expression<Func<TSrc, TVal>> expression, TVal value) {
@@ -175,7 +171,7 @@ namespace System.Immutable {
   }
 
 
-  public static class ExtensionMethods {
+  public static partial class ExtensionMethods {
     /// <summary>
     /// Contructs immutable object from existing one with changed member specified by lambda expression
     /// </summary>
@@ -183,6 +179,6 @@ namespace System.Immutable {
     /// <param name="value">Mutated Value</param>
     /// <returns></returns>
     public static TSrc With<TSrc, TVal>(this TSrc instance, Expression<Func<TSrc, TVal>> expression, TVal value) where TSrc : System.Immutable.IImmutable =>
-      WithInternal.Default.With(instance, expression, value);
+      WithPrivate.Default.With(instance, expression, value);
   }
 }
