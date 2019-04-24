@@ -32,7 +32,6 @@ namespace System.Immutable {
 
     // Contructs immutable object from existing one with changed member specified by lambda expression.
     public TSrc With<TSrc, TVal>(TSrc src, Expression<Func<TSrc, TVal>> expression, TVal value) {
-      if (src is null) throw new ArgumentNullException(nameof(src));
       if (expression is null) throw new ArgumentNullException(nameof(expression));
       if (expression.Parameters.Count() != 1) throw new NotSupportedException("With expression must have a single parameter");
 
