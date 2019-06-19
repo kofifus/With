@@ -164,7 +164,7 @@ namespace System.Immutable {
 
         return (activator, ctorParamsResolvers);
       }
-      throw new Exception($"Unable to find appropriate Constructor. Type '{type.Name}'."); // no ctor found
+      throw new Exception($"Unable to find appropriate {type.Name} Constructor for {instanceExpressionMember.Name}."); // no ctor found
     }
 
   }
