@@ -25,6 +25,15 @@ var source = new Employee("John", "Doe");
 var mutation = source.With(x => x.FirstName, "Foo");
 ```
 
+# Accessing previous values
+
+Instead of passing a new value you can pass a lambda accepting the old value and returning the new one:
+
+```
+var source = new Employee("John", "Doe");
+var mutation = source.With(x => x.FirstName, prevName => prevName + "2");
+```
+
 # Nested mutations
 
 `With` can set nested members and will only update references in the mutated path
