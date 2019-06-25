@@ -189,7 +189,7 @@ namespace System.Immutable {
     /// <param name="valueFunc">Lambda accepting the previous value and returning the new one</param>
     /// <returns></returns>
     public static TSrc With<TSrc, TVal>(this TSrc instance, Expression<Func<TSrc, TVal>> expression, Func<TVal, TVal> valueFunc) where TSrc : IImmutable {
-      var oldVal = expression.Compile().Invoke((TSrc)instance);
+      var oldVal = expression.Compile().Invoke(instance);
       var newVal = valueFunc(oldVal);
       return WithPrivate.Default.With(instance, expression, newVal);
     }
