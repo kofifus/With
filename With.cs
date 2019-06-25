@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
 using System.Linq.Expressions;
@@ -5,6 +6,7 @@ using System.Reflection;
 
 
 namespace System.Immutable {
+  // CtorParamResolver = (ctorMemberName, ctorParamResolver)
   using CtorParamResolver = ValueTuple<string, Func<object, object>>;
 
   [AttributeUsage(AttributeTargets.Constructor, AllowMultiple = false)]
@@ -16,11 +18,11 @@ namespace System.Immutable {
 
     // key: "{srcType.FullName}"  
     //  ie: "Employee"
-    // activator: args => new valType(args[0] as ctorParams[0].ParamType, ...) as object
-    //        ie: args => new Employee(args[0] as String, args[1] as String) as Object 
+    // ctorActivator: args => new valType(args[0] as ctorParams[0].ParamType, ...) as object
+    //            ie: args => new Employee(args[0] as String, args[1] as String) as Object 
     // ctorParamsResolvers: [ DstType(srcTypeProp1.Name, x => (x as srcType).srcTypeProp1) as Object), ... ]
     //                  ie: [ ( "EmployeeFirstName" , x => ((x as Employee).EmployeeFirstName) as Object) ), ( "EmployeeLastName" , x => ((x as Employee).EmployeeLastName) as Object) ) ]
-    ImmutableDictionary<string, (Activator activator, CtorParamResolver[] ctorParamsResolvers)> ActivationContextCache = ImmutableDictionary<string, (Activator activator, CtorParamResolver[] ctorParamsResolvers)>.Empty;
+    ImmutableDictionary<string, (Activator ctorActivator, CtorParamResolver[] ctorParamsResolvers)> ActivationContextCache = ImmutableDictionary<string, (Activator ctorActivator, CtorParamResolver[] ctorParamsResolvers)>.Empty;
 
     // key: "{srcType.FullName}|{WithMember}"  
     //  ie: "test.Organization|DevelopmentDepartment.Manager"
@@ -45,24 +47,24 @@ namespace System.Immutable {
 
         instanceExpression = memberExpression.Expression;
 
-        // resolve activator arguments
+        // resolve ctorActivator arguments
         var instance = ResolveInstanceDelegate<TSrc>(instanceExpression, parameterExpression).Invoke(src);
-        var (activator, ctorParamsResolvers) = ResolveActivator(instanceExpressionMember);
+        var (ctorActivator, ctorParamsResolvers) = ResolveActivator(instanceExpressionMember);
         var arguments = new object[ctorParamsResolvers.Length];
         var match = false;
 
         for (var i = 0; i < ctorParamsResolvers.Length; i++) {
-          var (resolverMemberName, resolver) = ctorParamsResolvers[i];
-          if (resolverMemberName == instanceExpressionMember.Name) {
+          var (ctorMemberName, ctorParamResolver) = ctorParamsResolvers[i];
+          if (ctorMemberName == instanceExpressionMember.Name) {
             arguments[i] = val;
           } else {
-            arguments[i] = resolver.Invoke(instance);
+            arguments[i] = ctorParamResolver.Invoke(instance);
             match = true;
           }
         }
 
         if (!match) throw new Exception($"Unable to construct object of type '{instanceExpressionMember.DeclaringType.Name}'. There is no constructor parameter matching member '{instanceExpressionMember.Name}'.");
-        val = activator.Invoke(arguments);
+        val = ctorActivator.Invoke(arguments);
 
       }
 
@@ -87,7 +89,7 @@ namespace System.Immutable {
       return (InstanceDelegate<TSrc>)instanceDelegate;
     }
 
-    (Activator, CtorParamResolver[]) ResolveActivator(MemberInfo instanceExpressionMember) {
+    (Activator ctorActivator, CtorParamResolver[]) ResolveActivator(MemberInfo instanceExpressionMember) {
       bool firstLetterCaseInsensitiveCompare(string s1, string s2) {
         if ((s1 is null && s2 is null) || ReferenceEquals(s1, s2)) return true;
         if (s1 is null || s2 is null || s1.Length != s2.Length) return false;
@@ -135,16 +137,16 @@ namespace System.Immutable {
               var memberExpression = Expression.MakeMemberAccess(parameterConvertExpression, member);
               var propertyConvertExpression = Expression.Convert(memberExpression, typeof(object));
               var lambdaExpression = Expression.Lambda<Func<object, object>>(propertyConvertExpression, parameterExpression);
-              var compiledExpression = lambdaExpression.Compile();
+              var ctorParamResolver = lambdaExpression.Compile();
 
-              ctorParamsResolvers[i++] = (member.Name, compiledExpression);
+              ctorParamsResolvers[i++] = (member.Name, ctorParamResolver);
             }
           }
           if (i < ctorParams.Length || !hasExpressionMember) continue; // this ctor will not work
         }
 
         // get activator
-        Activator activator;
+        Activator ctorActivator;
         {
           // calc activator: args => (new valType(args[0] as ctorParams[0].ParamType, args[1] as ctorParams[1].ParamType ...) as object
           var parameterExpression = Expression.Parameter(typeof(object[]));
@@ -159,10 +161,10 @@ namespace System.Immutable {
           var constructorExpression = Expression.New(ctor, argumentExpressions);
           var constructorConvertExpression = Expression.Convert(constructorExpression, typeof(object));
           var activatorLambdaExpression = Expression.Lambda<Activator>(constructorConvertExpression, parameterExpression);
-          activator = activatorLambdaExpression.Compile();
+          ctorActivator = activatorLambdaExpression.Compile();
         }
 
-        return (activator, ctorParamsResolvers);
+        return (ctorActivator, ctorParamsResolvers);
       }
       throw new Exception($"Unable to find appropriate {type.Name} Constructor for {instanceExpressionMember.Name}."); // no ctor found
     }
@@ -177,7 +179,14 @@ namespace System.Immutable {
     /// <param name="expression">Navigation lambda x => member</param>
     /// <param name="value">Mutated Value</param>
     /// <returns></returns>
-    public static TSrc With<TSrc, TVal>(this TSrc instance, Expression<Func<TSrc, TVal>> expression, TVal value) where TSrc : System.Immutable.IImmutable =>
+    public static TSrc With<TSrc, TVal>(this TSrc instance, Expression<Func<TSrc, TVal>> expression, TVal value) where TSrc : IImmutable =>
       WithPrivate.Default.With(instance, expression, value);
+
+    public static TSrc With<TSrc, TVal>(this TSrc instance, Expression<Func<TSrc, TVal>> expression, Func<TVal, TVal> valueFunc) where TSrc : IImmutable {
+      var oldVal = expression.Compile().Invoke((TSrc)instance);
+      var newVal = valueFunc(oldVal);
+      return WithPrivate.Default.With(instance, expression, newVal);
+    }
+
   }
 }
