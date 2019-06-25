@@ -182,6 +182,12 @@ namespace System.Immutable {
     public static TSrc With<TSrc, TVal>(this TSrc instance, Expression<Func<TSrc, TVal>> expression, TVal value) where TSrc : IImmutable =>
       WithPrivate.Default.With(instance, expression, value);
 
+    /// <summary>
+    /// Contructs immutable object from existing one with changed member specified by lambda expression
+    /// </summary>
+    /// <param name="expression">Navigation lambda x => member</param>
+    /// <param name="valueFunc">Lambda accepting the previous value and returning the new one</param>
+    /// <returns></returns>
     public static TSrc With<TSrc, TVal>(this TSrc instance, Expression<Func<TSrc, TVal>> expression, Func<TVal, TVal> valueFunc) where TSrc : IImmutable {
       var oldVal = expression.Compile().Invoke((TSrc)instance);
       var newVal = valueFunc(oldVal);
