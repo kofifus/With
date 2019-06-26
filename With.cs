@@ -160,11 +160,12 @@ namespace System.Immutable {
       // create unique cache key, calc same key for x=>x.p and y=>y.p
       var exprStr = instanceExpression.ToString();
       var dotPos = exprStr.IndexOf(Type.Delimiter);
-      var cacheKey = typeof(TSrc).FullName + '|' + (dotPos > 0 ? exprStr.Remove(0, exprStr.IndexOf(Type.Delimiter) + 1) : "");
+      var cacheKey = typeof(TSrc).FullName + '|' + (dotPos > 0 ? exprStr.Remove(0, exprStr.IndexOf(Type.Delimiter) + 1) : "root");
 
       if (InstanceDelegateCache.TryGetValue(cacheKey, out var instanceDelegate)) return (InstanceDelegate<TSrc>)instanceDelegate;
       var instanceConvertExpression = Expression.Convert(instanceExpression, typeof(object));
-      instanceDelegate = Expression.Lambda<InstanceDelegate<TSrc>>(instanceConvertExpression, parameterExpression).Compile();
+      var instanceConvertLambda = Expression.Lambda<InstanceDelegate<TSrc>>(instanceConvertExpression, parameterExpression);
+      instanceDelegate = instanceConvertLambda.Compile();
 
       InstanceDelegateCache = InstanceDelegateCache.SetItem(cacheKey, instanceDelegate);
       return (InstanceDelegate<TSrc>)instanceDelegate;
