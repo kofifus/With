@@ -16,7 +16,7 @@ namespace System.Immutable {
     delegate object Activator(params object[] args);
     delegate object InstanceDelegate<T>(T src);
 
-    // key: "{srcType.FullName}"  
+    // key: "{srcType.FullName}|{WithMember}"  
     //  ie: "Employee"
     // ctorActivator: args => new valType(args[0] as ctorParams[0].ParamType, ...) as object
     //            ie: args => new Employee(args[0] as String, args[1] as String) as Object 
@@ -28,7 +28,7 @@ namespace System.Immutable {
     //  ie: "test.Organization|DevelopmentDepartment.Manager"
     // val: x => WithMember as Object  
     //    ie: x => x.DevelopmentDepartment.Manager as Object
-    ImmutableDictionary<string, Delegate> InstanceExpressionCache = ImmutableDictionary<string, Delegate>.Empty;
+    ImmutableDictionary<string, Delegate> InstanceDelegateCache = ImmutableDictionary<string, Delegate>.Empty;
 
     public readonly static WithPrivate Default = new WithPrivate();
 
@@ -45,11 +45,14 @@ namespace System.Immutable {
         if (!(instanceExpression is MemberExpression memberExpression) || !(memberExpression.Member is MemberInfo instanceExpressionMember))
           throw new NotSupportedException($"Unable to process expression. Expression: '{instanceExpression}'.");
 
-        instanceExpression = memberExpression.Expression;
-
-        // resolve ctorActivator arguments
-        var instance = ResolveInstanceDelegate<TSrc>(instanceExpression, parameterExpression).Invoke(src);
+        // find and resolve ctor activator and arguments
         var (ctorActivator, ctorParamsResolvers) = ResolveActivator(instanceExpressionMember);
+
+        instanceExpression = memberExpression.Expression; // go one level up
+
+        // resolve instance 
+        var instance = ResolveInstanceDelegate<TSrc>(instanceExpression, parameterExpression).Invoke(src);
+
         var arguments = new object[ctorParamsResolvers.Length];
         var match = false;
 
@@ -71,24 +74,6 @@ namespace System.Immutable {
       return (TSrc)val;
     }
 
-    InstanceDelegate<TSrc> ResolveInstanceDelegate<TSrc>(Expression instanceExpression, ParameterExpression parameterExpression) {
-      // create unique cache key, calc same key for x=>x.p and y=>y.p
-      string key;
-      try {
-        var exprStr = instanceExpression.ToString();
-        key = typeof(TSrc).FullName + '|' + exprStr.Remove(0, exprStr.IndexOf(Type.Delimiter) + 1);
-      } catch (Exception ex) {
-        throw new Exception($"Unable to parse expression '{instanceExpression}'.", ex);
-      }
-
-      if (InstanceExpressionCache.TryGetValue(key, out var instanceDelegate)) return (InstanceDelegate<TSrc>)instanceDelegate;
-      var instanceConvertExpression = Expression.Convert(instanceExpression, typeof(object));
-      instanceDelegate = Expression.Lambda<InstanceDelegate<TSrc>>(instanceConvertExpression, parameterExpression).Compile();
-
-      InstanceExpressionCache = InstanceExpressionCache.SetItem(key, instanceDelegate);
-      return (InstanceDelegate<TSrc>)instanceDelegate;
-    }
-
     (Activator ctorActivator, CtorParamResolver[]) ResolveActivator(MemberInfo instanceExpressionMember) {
       bool firstLetterCaseInsensitiveCompare(string s1, string s2) {
         if ((s1 is null && s2 is null) || ReferenceEquals(s1, s2)) return true;
@@ -99,7 +84,9 @@ namespace System.Immutable {
       }
 
       var type = instanceExpressionMember.DeclaringType;
-      if (ActivationContextCache.TryGetValue(type.FullName, out var res)) return res;
+      var cacheKey = type.FullName + "|" + instanceExpressionMember.Name;
+      if (ActivationContextCache.TryGetValue(cacheKey, out var res))
+        return res;
 
       // get ctors list
       ConstructorInfo[] ctors;
@@ -164,11 +151,25 @@ namespace System.Immutable {
           ctorActivator = activatorLambdaExpression.Compile();
         }
 
+        ActivationContextCache = ActivationContextCache.Add(cacheKey, (ctorActivator, ctorParamsResolvers));
         return (ctorActivator, ctorParamsResolvers);
       }
       throw new Exception($"Unable to find appropriate {type.Name} Constructor for {instanceExpressionMember.Name}."); // no ctor found
     }
 
+    InstanceDelegate<TSrc> ResolveInstanceDelegate<TSrc>(Expression instanceExpression, ParameterExpression parameterExpression) {
+      // create unique cache key, calc same key for x=>x.p and y=>y.p
+      var exprStr = instanceExpression.ToString();
+      var dotPos = exprStr.IndexOf(Type.Delimiter);
+      var cacheKey = typeof(TSrc).FullName + '|' + (dotPos > 0 ? exprStr.Remove(0, exprStr.IndexOf(Type.Delimiter) + 1) : "");
+
+      if (InstanceDelegateCache.TryGetValue(cacheKey, out var instanceDelegate)) return (InstanceDelegate<TSrc>)instanceDelegate;
+      var instanceConvertExpression = Expression.Convert(instanceExpression, typeof(object));
+      instanceDelegate = Expression.Lambda<InstanceDelegate<TSrc>>(instanceConvertExpression, parameterExpression).Compile();
+
+      InstanceDelegateCache = InstanceDelegateCache.SetItem(cacheKey, instanceDelegate);
+      return (InstanceDelegate<TSrc>)instanceDelegate;
+    }
   }
 
 
@@ -193,6 +194,6 @@ namespace System.Immutable {
       var newVal = valueFunc(oldVal);
       return WithPrivate.Default.With(instance, expression, newVal);
     }
-
   }
+
 }
