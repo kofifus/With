@@ -85,8 +85,7 @@ namespace System.Immutable {
 
       var type = instanceExpressionMember.DeclaringType;
       var cacheKey = type.FullName + "|" + instanceExpressionMember.Name;
-      if (ActivationContextCache.TryGetValue(cacheKey, out var res))
-        return res;
+      if (ActivationContextCache.TryGetValue(cacheKey, out var res)) return res;
 
       // get ctors list
       ConstructorInfo[] ctors;
