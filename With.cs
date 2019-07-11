@@ -60,9 +60,9 @@ namespace System.Immutable {
           var (ctorMemberName, ctorParamResolver) = ctorParamsResolvers[i];
           if (ctorMemberName == instanceExpressionMember.Name) {
             arguments[i] = val;
+            match = true;
           } else {
             arguments[i] = ctorParamResolver.Invoke(instance);
-            match = true;
           }
         }
 
