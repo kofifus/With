@@ -68,7 +68,6 @@ namespace System.Immutable {
 
         if (!match) throw new Exception($"Unable to construct object of type '{instanceExpressionMember.DeclaringType.Name}'. There is no constructor parameter matching member '{instanceExpressionMember.Name}'.");
         val = ctorActivator.Invoke(arguments);
-
       }
 
       return (TSrc)val;
@@ -153,7 +152,7 @@ namespace System.Immutable {
         ActivationContextCache = ActivationContextCache.Add(cacheKey, (ctorActivator, ctorParamsResolvers));
         return (ctorActivator, ctorParamsResolvers);
       }
-      throw new Exception($"Unable to find appropriate {type.Name} Constructor for {instanceExpressionMember.Name}."); // no ctor found
+      throw new Exception($"Unable to find {type.Name} constructor (when trying to mutate {instanceExpressionMember.Name})."); // no ctor found
     }
 
     InstanceDelegate<TSrc> ResolveInstanceDelegate<TSrc>(Expression instanceExpression, ParameterExpression parameterExpression) {
