@@ -74,7 +74,7 @@ namespace System.Immutable {
     }
 
     (Activator ctorActivator, CtorParamResolver[]) ResolveActivator(MemberInfo instanceExpressionMember) {
-      bool firstLetterCaseInsensitiveCompare(string s1, string s2) {
+      static bool firstLetterCaseInsensitiveCompare(string s1, string s2) {
         if ((s1 is null && s2 is null) || ReferenceEquals(s1, s2)) return true;
         if (s1 is null || s2 is null || s1.Length != s2.Length) return false;
         if (s1.Length == 0) return true;
