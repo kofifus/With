@@ -11,10 +11,7 @@ public class Employee : IImmutable {
   public string FirstName { get; }
   public readonly string LastName;
 
-  public Employee(string firstName, string lastName) {
-    FirstName = firstName;
-    LastName = lastName;
-  }
+  public Employee(string firstName, string lastName) { FirstName = firstName; LastName = lastName; }
 }
 ```
 
@@ -40,23 +37,17 @@ var mutation = source.With(x => x.FirstName, prevName => prevName + "2");
 
 ```
 public class Department : IImmutable {
-	public string Title { get; }
-	public Employee Manager { get; }
+  public string Title { get; }
+  public Employee Manager { get; }
 
-	public Department(string title, Employee manager) {
-		Title = title;
-		Manager = manager;
-	}
+  public Department(string title, Employee manager) { Title = title; Manager = manager; }
 }
 
 public class Organization : IImmutable {
-	public string Name { get; }
-	public Department Sales { get; }
+  public string Name { get; }
+  public Department Sales { get; }
 
-	public Organization(string name, Department sales) {
-		Name = name;
-		Sales = sales;
-	}
+  public Organization(string name, Department sales) { Name = name; Sales = sales; }
 }
 
 var org = new Organization("Organization", new Department("Development Department", new Employee("John", "Doe")));
@@ -87,10 +78,7 @@ public class Employee : IImmutable {
   public Employee(string firstName) : this(firstName, "") { }
 
   [WithConstructor]
-  public Employee(string firstName, string lastName) {
-    FirstName = firstName;
-    LastName = lastName;
-  }
+  public Employee(string firstName, string lastName) { FirstName = firstName; LastName = lastName; }
 }
 
 public class Department : IImmutable {
@@ -103,27 +91,15 @@ public class Department : IImmutable {
   public Department(string title) : this(title, new Employee("", "")) { }
 
   // With will choose this ctor 
-  public Department(string title, Employee manager) {
-    Title = title;
-    Manager = manager;
-    Created = DateTime.Now;
-  }
+  public Department(string title, Employee manager) { Title = title; Manager = manager; Created = DateTime.Now; }
 }
 
 public class Organization : IImmutable {
   public string Name { get; }
   public Department Sales { get; }
 
-  public Organization(string name) {
-    Name = name;
-    Sales = new Department();
-  }
-
-  public Organization(string name, Department sales) {
-    Name = name;
-    Sales = sales;
-  }
-
+  public Organization(string name) { Name = name; Sales = new Department(); }
+  public Organization(string name, Department sales) { Name = name; Sales = sales; }
 }
 
 
