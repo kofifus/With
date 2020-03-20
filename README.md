@@ -19,16 +19,8 @@ Apply modification:
 
 ```
 var source = new Employee("John", "Doe");
-var mutation = source.With(x => x.FirstName, "Foo");
-```
-
-# Accessing previous values
-
-Instead of passing a new value you can pass a lambda accepting the old value and returning the new one:
-
-```
-var source = new Employee("John", "Doe");
-var mutation = source.With(x => x.FirstName, prevName => prevName + "2");
+var mutation1 = source.With(x => x.FirstName, "Foo");
+var mutation2 = source.With((x => x.FirstName, "newFirst"), (x => x.LastName, "newLast"));
 ```
 
 # Nested mutations
@@ -65,8 +57,9 @@ When a type has multiple constructors, `With` will search for a constructor to u
 
 - If there are no consturctors throw an exception
 - If there are any consturctors with attribute `[WithConstructor]` consider only them
-- Consider constructors in the order of number of parameters (lowest first)
-- Look for the matching constructor to use. A constructor matches if each parameter match one of the members in both type and name (name can have a different case for the first letter), and also the memeber being mutated is one of the parameters.
+- Consider constructors in a descending order of number of arguments (most arguments first)
+- Look for the matching constructor to use. A constructor matches if each parameter match one of the members in both type and name (name can have a different case for the first letter), and also the memeber(s) being mutated is one of the parameters.
+- If `With` is invoked with multiple mutations, try first to find a constructor that can accept _all_ mutated members, if there is no such constructor, try to find a constructor to mutate each member separately. 
 
 # Complex example:
 
@@ -117,7 +110,7 @@ class Program {
     Console.WriteLine(Object.ReferenceEquals(expected.Name, actual.Name)); // true
     Console.WriteLine(Object.ReferenceEquals(expected.Sales.Title, expected.Sales.Title)); // true
 
-    var actual1 = expected.With(x => x.Sales.Manager.FirstName, "Foo");
+    var actual1 = expected.With((x => x.Sales.Manager.FirstName, "Foo"), (x => x.Name, "newOrg"));
     Console.WriteLine(Object.ReferenceEquals(actual, actual1)); // false
 
     Console.ReadKey(true);
@@ -127,5 +120,5 @@ class Program {
 
 # Notes
 
-- All reflection is cached with lambda expressions for great efficiency
+- All reflections and lambda invocations are cached with lambda expressions for great efficiency
 - This project started as a fork of [Remute](https://github.com/ababik/Remute) and credit goes there
