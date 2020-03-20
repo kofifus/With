@@ -1,74 +1,102 @@
 using System;
 using System.Immutable;
+using System.Security.Cryptography.X509Certificates;
 
-namespace With.Tests {
+namespace Test
+{
 
-  public class Employee : IImmutable {
+  public class Employee : IImmutable
+  {
     public string FirstName { get; }
     public readonly string LastName;
+    public int Age { get; }
 
-    public Employee(string firstName) : this(firstName, "") { }
+    public Employee(string firstName) : this(firstName, "", 0) { }
 
     [WithConstructor]
-    public Employee(string firstName, string lastName) {
-      FirstName = firstName;
-      LastName = lastName;
-    }
+    public Employee(string firstName, string lastName, int age) { FirstName = firstName; LastName = lastName; Age = age; }
   }
 
-  public class Department : IImmutable {
+  public class Department : IImmutable
+  {
     public string Title { get; }
     public Employee Manager { get; }
     public DateTime Created { get; }
 
-    public Department() : this("", new Employee("", "")) { }
-    public Department(string title, int manager) : this(title, new Employee("", "")) { }
-    public Department(string title) : this(title, new Employee("", "")) { }
+    public Department() : this("", new Employee("", "", 0)) { }
+    public Department(string title, int manager) : this(title, new Employee("", "", 0)) { }
+    public Department(string title) : this(title, new Employee("", "", 0)) { }
 
     // With will choose this ctor 
-    public Department(string title, Employee manager) {
+    public Department(string title, Employee manager)
+    {
       Title = title;
       Manager = manager;
       Created = DateTime.Now;
     }
   }
 
-  public class Organization : IImmutable {
+  public class Organization : IImmutable
+  {
     public string Name { get; }
     public Department Sales { get; }
 
-    public Organization(string name) {
+    public Organization(string name)
+    {
       Name = name;
       Sales = new Department();
     }
 
-    public Organization(string name, Department sales) {
+    public Organization(string name, Department sales)
+    {
       Name = name;
       Sales = sales;
     }
+  }
 
+  public class Manager : Employee
+  {
+    public int Rank { get; }
+
+    public Manager(string firstName, string lastName, int age, int rank) : base(firstName, lastName, age) { this.Rank = rank; }
   }
 
 
-  class Program {
+  class Program
+  {
 
-    static void Main(string[] args) {
-      var expected = new Organization("Organization", new Department("Development Department", new Employee("John", "Doe")));
-      var actual = expected.With(x => x.Sales.Manager.FirstName, "Foo");
+    static void Main(string[] _)
+    {
+      var employee = new Employee("firstname", "lastname", 40);
+      var mutatedEmployee = employee.With(x => x.FirstName, "mutatedFirstName");
+      var mutatedEmployee1 = employee.With(x => x.FirstName, "2mutatedFirstName");
+      var mutatedEmployee2 = employee.With((x => x.FirstName, "mutatedFirstName"), (x => x.LastName, "xxx"));
+      var mutatedEmployee3 = employee.With((x => x.FirstName, "mutatedFirstName"), (x => x.LastName, "xxx"));
+      var mutatedEmployee4 = employee.With((x => x.LastName, "xxx"), (x => x.FirstName, "mutatedFirstName"));
+      var mutatedEmployee5 = employee.With((x => x.FirstName, "mutatedFirstName"), (x => x.Age, 5));
 
-      Console.WriteLine(expected.Sales.Manager.FirstName);
-      Console.WriteLine(actual.Sales.Manager.FirstName);
-      Console.WriteLine(Object.ReferenceEquals(expected, actual)); // false
-      Console.WriteLine(Object.ReferenceEquals(expected.Sales, actual.Sales)); // false
-      Console.WriteLine(Object.ReferenceEquals(expected.Sales.Manager, actual.Sales.Manager)); // false
-      Console.WriteLine(Object.ReferenceEquals(expected.Name, actual.Name)); // true
-      Console.WriteLine(Object.ReferenceEquals(expected.Sales.Title, expected.Sales.Title)); // true
+      var original = new Organization("Organization", new Department("Development Department", new Employee("John", "Doe", 50)));
+      var mutated = original.With(x => x.Sales.Manager.FirstName, "mutatedFirstName");
 
-      var actual1 = expected.With(x => x.Sales.Manager.FirstName, "Foo");
-      Console.WriteLine(Object.ReferenceEquals(actual, actual1)); // false
+      var mutated2 = original.With((x=>x.Name, "mutatedOrg"), (x => x.Sales.Manager.FirstName, "Foo"));
+      var mutated3 = original.With((x => x.Name, "mutatedOrg"), (x => x.Name, "zzz"));
+      Console.WriteLine($"{original.Sales.Manager.FirstName} -> {mutated.Sales.Manager.FirstName}");
+      Console.WriteLine(Object.ReferenceEquals(original, mutated)); // false
+      Console.WriteLine(Object.ReferenceEquals(original.Sales, mutated.Sales)); // false
+      Console.WriteLine(Object.ReferenceEquals(original.Sales.Manager, mutated.Sales.Manager)); // false
+      Console.WriteLine(Object.ReferenceEquals(original.Name, mutated.Name)); // true
+      Console.WriteLine(Object.ReferenceEquals(original.Sales.Title, original.Sales.Title)); // true
+      
+      var mutated1 = original.With(x => x.Sales.Manager.FirstName, "Foo");
+      Console.WriteLine(Object.ReferenceEquals(mutated, mutated1)); // false
+      
+      var manager = new Manager("Big", "Boss", 20, 1);
+      var manager1 = manager.With(x => x.Rank, 3);
+      Console.WriteLine($"{manager.Rank} -> {manager1.Rank}");
 
       Console.ReadKey(true);
     }
   }
-}
 
+}
+ 
