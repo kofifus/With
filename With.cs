@@ -1,198 +1,220 @@
-using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
 using System.Linq.Expressions;
 using System.Reflection;
+using System.Diagnostics;
+using System.Runtime.CompilerServices;
 
+#nullable disable
 
-namespace System.Immutable {
-  // CtorParamResolver = (ctorMemberName, ctorParamResolver)
-  using CtorParamResolver = ValueTuple<string, Func<object, object>>;
+namespace System.Immutable
+{
+  public interface IImmutable { };
+}
 
+namespace System.Immutable
+{
   [AttributeUsage(AttributeTargets.Constructor, AllowMultiple = false)]
   public sealed class WithConstructor : Attribute { }
 
-  class WithPrivate {
-    delegate object Activator(params object[] args);
-    delegate object InstanceDelegate<T>(T src);
+  static class WithPrivate
+  {
+    delegate object CtorActivator(object instance, object[] values);
+    delegate object MemberResolver<T>(T src);
 
-    // key: "{srcType.FullName}|{WithMember}"  
-    //  ie: "Employee"
-    // ctorActivator: args => new valType(args[0] as ctorParams[0].ParamType, ...) as object
-    //            ie: args => new Employee(args[0] as String, args[1] as String) as Object 
-    // ctorParamsResolvers: [ DstType(srcTypeProp1.Name, x => (x as srcType).srcTypeProp1) as Object), ... ]
-    //                  ie: [ ( "EmployeeFirstName" , x => ((x as Employee).EmployeeFirstName) as Object) ), ( "EmployeeLastName" , x => ((x as Employee).EmployeeLastName) as Object) ) ]
-    ImmutableDictionary<string, (Activator ctorActivator, CtorParamResolver[] ctorParamsResolvers)> ActivationContextCache = ImmutableDictionary<string, (Activator ctorActivator, CtorParamResolver[] ctorParamsResolvers)>.Empty;
+    // CtorActivatorCache caches compiled ctor activations for effiency
+    // key: "{srcType.FullName}|{member}|.." ,  ie: "Test.Employee|FirstName|Age
+    // ctorActivator: (x, args[]) => { var cx = (Employee)x; return new Employee((String)args[0], cx.LastName, (int)args[1]); }
+    static ImmutableDictionary<string, CtorActivator> CtorActivatorCache = ImmutableDictionary<string, CtorActivator>.Empty;
 
-    // key: "{srcType.FullName}|{WithMember}"  
-    //  ie: "test.Organization|DevelopmentDepartment.Manager"
-    // val: x => WithMember as Object  
-    //    ie: x => x.DevelopmentDepartment.Manager as Object
-    ImmutableDictionary<string, Delegate> InstanceDelegateCache = ImmutableDictionary<string, Delegate>.Empty;
-
-    public readonly static WithPrivate Default = new WithPrivate();
+    // MemberResolverCache caches compiled member access lambdas for efficiency 
+    // key: "{srcType.FullName}|{member}" , ie: "Test.Organization|DevelopmentDepartment.Manager"
+    // delegate: x => x.DevelopmentDepartment.Manager as Object
+    static ImmutableDictionary<string, Delegate> MemberResolverCache = ImmutableDictionary<string, Delegate>.Empty;
 
     // Contructs immutable object from existing one with changed member specified by lambda expression.
-    public TSrc With<TSrc, TVal>(TSrc src, Expression<Func<TSrc, TVal>> expression, TVal value) {
-      if (expression is null) throw new ArgumentNullException(nameof(expression));
-      if (expression.Parameters.Count() != 1) throw new NotSupportedException("With expression must have a single parameter");
+    static public TSrc With<TSrc>(TSrc src, params (LambdaExpression expression, object val)[] withPairs) 
+    {
+      var memberNames = new string[withPairs.Length];
+      var memberValues = new object[withPairs.Length];
 
-      var parameterExpression = expression.Parameters.First();
-      var instanceExpression = expression.Body;
-      var val = (object)value;
-
-      while (instanceExpression != parameterExpression) {
-        if (!(instanceExpression is MemberExpression memberExpression) || !(memberExpression.Member is MemberInfo instanceExpressionMember))
-          throw new NotSupportedException($"Unable to process expression. Expression: '{instanceExpression}'.");
-
-        // find and resolve ctor activator and arguments
-        var (ctorActivator, ctorParamsResolvers) = ResolveActivator(instanceExpressionMember);
-
-        instanceExpression = memberExpression.Expression; // go one level up
-
-        // resolve instance 
-        var instance = ResolveInstanceDelegate<TSrc>(instanceExpression, parameterExpression).Invoke(src);
-
-        var arguments = new object[ctorParamsResolvers.Length];
-        var match = false;
-
-        for (var i = 0; i < ctorParamsResolvers.Length; i++) {
-          var (ctorMemberName, ctorParamResolver) = ctorParamsResolvers[i];
-          if (ctorMemberName == instanceExpressionMember.Name) {
-            arguments[i] = val;
-            match = true;
-          } else {
-            arguments[i] = ctorParamResolver.Invoke(instance);
-          }
-        }
-
-        if (!match) throw new Exception($"Unable to construct object of type '{instanceExpressionMember.DeclaringType.Name}'. There is no constructor parameter matching member '{instanceExpressionMember.Name}'.");
-        val = ctorActivator.Invoke(arguments);
+      // sanity checks
+      if (src is null) throw new NotSupportedException("source is null");
+      foreach (var (withExpression, _) in withPairs) {
+        if (withExpression is null) throw new ArgumentNullException(nameof(withExpression));
+        if (withExpression.Parameters.Count() != 1) throw new NotSupportedException("With expression must have a single parameter");
       }
 
-      return (TSrc)val;
+      for (var i = 0; i < withPairs.Length; i++) {
+        var (withExpression, withValue) = withPairs[i];
+
+        var parameterExpression = withExpression.Parameters.First();
+        var instanceExpression = withExpression.Body;
+        var val = (object)withValue;
+
+        // roll all nested member access to the top
+        while (true) {
+          if (!(instanceExpression is MemberExpression memberExpression) || !(memberExpression.Member is MemberInfo memberInfo))
+            throw new NotSupportedException($"Unable to process expression. Expression: '{instanceExpression}'.");
+
+          memberNames[i] = memberInfo.Name;
+          memberValues[i] = val;
+
+          if (memberExpression.Expression == parameterExpression) break; // we're done
+          if (memberInfo.DeclaringType is null) throw new NotSupportedException($"memberInfo.DeclaringType is null");
+
+          // resolve instance and activator and invoke
+          var instance = GetInstance<TSrc>(memberExpression.Expression, parameterExpression).Invoke(src);
+          var (ok, ctorActivator) = GetActivator(memberInfo.DeclaringType, new string[] { memberInfo.Name });
+          if (!ok) throw new Exception($"Unable to find {memberInfo.DeclaringType?.Name} constructor (when trying to mutate {memberInfo.Name})."); // no ctor found
+          val = ctorActivator.Invoke(instance, new object[] { val });
+
+          // go one level up
+          instanceExpression = memberExpression.Expression; 
+        }
+      }
+
+      var srcType = typeof(TSrc);
+
+      // try to find a single ctor for all mutations
+      if (withPairs.Length > 1) {
+        var (ok, ctorActivator) = GetActivator(srcType, memberNames);
+        if (ok) return (TSrc)ctorActivator.Invoke(src, memberValues);
+
+        #if DEBUG
+          Debug.WriteLine($"No single ctor for: {srcType}({string.Join(", ", memberNames)})");
+        #endif
+      }
+
+      // mutate one by one
+      TSrc res = src;
+      for (var i=0; i<withPairs.Length; i++) { 
+        var (ok, ctorActivator) = GetActivator(typeof(TSrc), new string[] { memberNames[i] });
+        if (!ok) throw new Exception($"Unable to find {srcType.Name} constructor (when trying to mutate {memberNames[i]})."); // no ctor found
+        res = (TSrc)ctorActivator.Invoke(res, new object[] { memberValues[i] });
+      }
+
+      return res;
     }
 
-    (Activator ctorActivator, CtorParamResolver[]) ResolveActivator(MemberInfo instanceExpressionMember) {
-      static bool firstLetterCaseInsensitiveCompare(string s1, string s2) {
-        if ((s1 is null && s2 is null) || ReferenceEquals(s1, s2)) return true;
-        if (s1 is null || s2 is null || s1.Length != s2.Length) return false;
-        if (s1.Length == 0) return true;
-        if (!s1.Substring(0, 1).Equals(s2.Substring(0, 1), StringComparison.OrdinalIgnoreCase)) return false;
-        return s1.Length == 1 || s1.Substring(1).Equals(s2.Substring(1));
-      }
+    static (bool, CtorActivator) GetActivator(Type type, string[] memberNames) 
+    {
+      var cacheKey = type?.FullName + memberNames.Aggregate("", (total, next) => total + "|" + next); 
 
-      var type = instanceExpressionMember.DeclaringType;
-      var cacheKey = type.FullName + "|" + instanceExpressionMember.Name;
-      if (ActivationContextCache.TryGetValue(cacheKey, out var res)) return res;
+      if (CtorActivatorCache.TryGetValue(cacheKey, out var ctorActivatr)) return (true, ctorActivatr); // found in cache
+
+      // get type members
+      var members = type?.GetTypeInfo()
+        .GetMembers(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+        .Where(memberInfo => memberInfo is PropertyInfo || (memberInfo is FieldInfo && memberInfo.GetCustomAttribute<CompilerGeneratedAttribute>() == null)) // filter out backing members
+        .ToArray();
 
       // get ctors list
-      ConstructorInfo[] ctors;
-      {
-        var allCtors = type.GetTypeInfo().DeclaredConstructors.Where(c => c.GetParameters().Count() > 0);
-        var attrCtors = allCtors.Where(c => c.GetCustomAttributes(false).Any(a => a is WithConstructor));
-        ctors = (attrCtors.Count() > 0 ? attrCtors : allCtors).ToArray();
-      }
-      ctors.OrderBy(x => x.GetParameters());
+      var allCtors = type?.GetTypeInfo().DeclaredConstructors.Where(c => c.GetParameters().Count() > 0);
+      var attrCtors = allCtors.Where(c => c.GetCustomAttributes(false).Any(a => a is WithConstructor));
+      var ctors = (attrCtors.Count() > 0 ? attrCtors : allCtors);
+      ctors = ctors.OrderByDescending(x => x.GetParameters().Length);
+
+      var x = Expression.Parameter(typeof(object), "x");
+      var xAsType = Expression.Parameter(type, "cx");
+      var argsArray = Expression.Parameter(typeof(object[]), "vars");
+      var argsElements = memberNames.Select((_, i) => Expression.ArrayIndex(argsArray, Expression.Constant(i, typeof(int)))).ToArray();
 
       foreach (var ctor in ctors) {
         var ctorParams = ctor.GetParameters();
-        var hasExpressionMember = false;
+        var nMatches = 0;
+        var ctorParamsExpressions = new Expression[ctorParams.Length];
 
-        // Get ctorParamsResolvers
-        var ctorParamsResolvers = new CtorParamResolver[ctorParams.Length];
-        {
-          var members = type.GetTypeInfo().DeclaredMembers.ToArray();
+        var i = 0;
+        foreach (var paramInfo in ctorParams) {
+          // get matching member where the name matches (except for first letter case) and the type matches
+          var matchingMembersInfo = members.Where(memberInfo => 
+            FirstLetterCaseInsensitiveCompare(memberInfo.Name, paramInfo.Name ?? "")
+            && ((memberInfo.MemberType is MemberTypes.Field && ((FieldInfo)memberInfo).FieldType.Equals(paramInfo.ParameterType))
+               || (memberInfo.MemberType is MemberTypes.Property && ((PropertyInfo)memberInfo).PropertyType.Equals(paramInfo.ParameterType))));
+          if (matchingMembersInfo.Count()!=1) break; // this ctor does not have a match between parameters and members, skip it
+          var memberInfo = matchingMembersInfo.First();
 
-          var i = 0;
-          foreach (var parameter in ctorParams) {
-            //var member = members.Where(x => string.Equals(x.Name, parameter.Name, StringComparison.OrdinalIgnoreCase)).SingleOrDefault();
-            var member = members.Where(x => firstLetterCaseInsensitiveCompare(x.Name, parameter.Name)).SingleOrDefault();
-            if (member is null
-                || (member.MemberType is MemberTypes.Field && ((FieldInfo)member).FieldType != parameter.ParameterType)
-                || (member.MemberType is MemberTypes.Property && ((PropertyInfo)member).PropertyType != parameter.ParameterType)) break;
-
-            if (firstLetterCaseInsensitiveCompare(member.Name, instanceExpressionMember.Name)) {
-              ctorParamsResolvers[i++] = (member.Name, null);
-              hasExpressionMember = true;
-            } else {
-              // calc lambdaExpression: x => (x as srcType).member) as object
-              var parameterExpression = Expression.Parameter(typeof(object));
-              var parameterConvertExpression = Expression.Convert(parameterExpression, type);
-              var memberExpression = Expression.MakeMemberAccess(parameterConvertExpression, member);
-              var propertyConvertExpression = Expression.Convert(memberExpression, typeof(object));
-              var lambdaExpression = Expression.Lambda<Func<object, object>>(propertyConvertExpression, parameterExpression);
-              var ctorParamResolver = lambdaExpression.Compile();
-
-              ctorParamsResolvers[i++] = (member.Name, ctorParamResolver);
-            }
+          var matchIndex = Array.FindIndex(memberNames, x => x.Equals(memberInfo.Name));
+          if (matchIndex!=-1) { 
+            // this is the mutated member
+            ctorParamsExpressions[i++] = Expression.Convert(argsElements[matchIndex], paramInfo.ParameterType); // v as param type
+            nMatches++;
+          } else { 
+            // use existing member for parameter
+            ctorParamsExpressions[i++] = Expression.MakeMemberAccess(xAsType, memberInfo); // cx.member
           }
-          if (i < ctorParams.Length || !hasExpressionMember) continue; // this ctor will not work
         }
+        if (i < ctorParams.Length || nMatches!=memberNames.Length) continue; // this ctor will not work
 
-        // get activator
-        Activator ctorActivator;
-        {
-          // calc activator: args => (new valType(args[0] as ctorParams[0].ParamType, args[1] as ctorParams[1].ParamType ...) as object
-          var parameterExpression = Expression.Parameter(typeof(object[]));
-          var argumentExpressions = new Expression[ctorParams.Length];
+        // we found a ctor, calc ctorActivator:
+        //   (object x, object[] args) => { var cx = (type)x; return new type(cx.member1, ..., args[0], ...); }
+        var activatorBody = Expression.Block(
+          new ParameterExpression[] { xAsType },
+          Expression.Assign(xAsType, Expression.Convert(x, type)),
+          Expression.New(ctor, ctorParamsExpressions));
+        var activatorParameters = new ParameterExpression[] { x, argsArray };
+        CtorActivator ctorActivator = Expression.Lambda<CtorActivator>(activatorBody, activatorParameters).Compile();
 
-          for (var i = 0; i < ctorParams.Length; i++) {
-            var arrayExpression = Expression.ArrayIndex(parameterExpression, Expression.Constant(i));
-            var arrayConvertExpression = Expression.Convert(arrayExpression, ctorParams[i].ParameterType);
-            argumentExpressions[i] = arrayConvertExpression;
-          }
+        #if DEBUG
+          Debug.WriteLine($"CtorActivatorCache Caching key: {cacheKey}");
+          Debug.WriteLine($"  (object x, object[] vars) => {{ {activatorBody.Expressions[0]}; return {activatorBody.Expressions[1]}; }}");
+        #endif
 
-          var constructorExpression = Expression.New(ctor, argumentExpressions);
-          var constructorConvertExpression = Expression.Convert(constructorExpression, typeof(object));
-          var activatorLambdaExpression = Expression.Lambda<Activator>(constructorConvertExpression, parameterExpression);
-          ctorActivator = activatorLambdaExpression.Compile();
-        }
-
-        ActivationContextCache = ActivationContextCache.Add(cacheKey, (ctorActivator, ctorParamsResolvers));
-        return (ctorActivator, ctorParamsResolvers);
+        CtorActivatorCache = CtorActivatorCache.Add(cacheKey, ctorActivator); // cache it
+        return (true, ctorActivator);
       }
-      throw new Exception($"Unable to find {type.Name} constructor (when trying to mutate {instanceExpressionMember.Name})."); // no ctor found
+
+      return (false, default); // could not find a ctor
     }
 
-    InstanceDelegate<TSrc> ResolveInstanceDelegate<TSrc>(Expression instanceExpression, ParameterExpression parameterExpression) {
+    static MemberResolver<TSrc> GetInstance<TSrc>(Expression instanceExpression, ParameterExpression parameterExpression)
+    {
       // create unique cache key, calc same key for x=>x.p and y=>y.p
       var exprStr = instanceExpression.ToString();
       var dotPos = exprStr.IndexOf(Type.Delimiter);
       var cacheKey = typeof(TSrc).FullName + '|' + (dotPos > 0 ? exprStr.Remove(0, exprStr.IndexOf(Type.Delimiter) + 1) : "root");
+       
+      if (MemberResolverCache.TryGetValue(cacheKey, out var memberResolverDelegate)) return (MemberResolver<TSrc>)memberResolverDelegate; // found in cache
 
-      if (InstanceDelegateCache.TryGetValue(cacheKey, out var instanceDelegate)) return (InstanceDelegate<TSrc>)instanceDelegate;
       var instanceConvertExpression = Expression.Convert(instanceExpression, typeof(object));
-      var instanceConvertLambda = Expression.Lambda<InstanceDelegate<TSrc>>(instanceConvertExpression, parameterExpression);
-      instanceDelegate = instanceConvertLambda.Compile();
+      var instanceConvertLambda = Expression.Lambda<MemberResolver<TSrc>>(instanceConvertExpression, parameterExpression);
+      memberResolverDelegate = instanceConvertLambda.Compile();
 
-      InstanceDelegateCache = InstanceDelegateCache.SetItem(cacheKey, instanceDelegate);
-      return (InstanceDelegate<TSrc>)instanceDelegate;
+      #if DEBUG
+        Debug.WriteLine($"MemberResolverCache Caching key: {cacheKey}");
+        Debug.WriteLine($"  {instanceConvertLambda}");
+      #endif
+
+      MemberResolverCache = MemberResolverCache.Add(cacheKey, memberResolverDelegate);
+      return (MemberResolver<TSrc>)memberResolverDelegate;
+    }
+
+    static bool FirstLetterCaseInsensitiveCompare(string s1, string s2)
+    {
+      if ((s1 is null && s2 is null) || ReferenceEquals(s1, s2)) return true;
+      if (s1 is null || s2 is null || s1.Length != s2.Length) return false;
+      if (s1.Length == 0) return true;
+      if (!s1.Substring(0, 1).Equals(s2.Substring(0, 1), StringComparison.OrdinalIgnoreCase)) return false;
+      return s1.Length == 1 || s1.Substring(1).Equals(s2.Substring(1));
     }
   }
 
 
-  public static partial class ExtensionMethods {
-    /// <summary>
-    /// Contructs immutable object from existing one with changed member specified by lambda expression
-    /// </summary>
-    /// <param name="expression">Navigation lambda x => member</param>
-    /// <param name="value">Mutated Value</param>
-    /// <returns></returns>
-    public static TSrc With<TSrc, TVal>(this TSrc instance, Expression<Func<TSrc, TVal>> expression, TVal value) where TSrc : IImmutable =>
-      WithPrivate.Default.With(instance, expression, value);
+  public static partial class ExtensionMethods
+  {
+    // mutate a single member
+    public static TSrc With<TSrc, TVal>(this TSrc instance, Expression<Func<TSrc, TVal>> exp, TVal val) where TSrc : IImmutable =>  WithPrivate.With(instance, (exp, val));
 
-    /// <summary>
-    /// Contructs immutable object from existing one with changed member specified by lambda expression
-    /// </summary>
-    /// <param name="expression">Navigation lambda x => member</param>
-    /// <param name="valueFunc">Lambda accepting the previous value and returning the new one</param>
-    /// <returns></returns>
-    public static TSrc With<TSrc, TVal>(this TSrc instance, Expression<Func<TSrc, TVal>> expression, Func<TVal, TVal> valueFunc) where TSrc : IImmutable {
-      var oldVal = expression.Compile().Invoke(instance);
-      var newVal = valueFunc(oldVal);
-      return WithPrivate.Default.With(instance, expression, newVal);
-    }
+    // mutate multiple members
+    public static TSrc With<TSrc, TVal1>(this TSrc instance, (Expression<Func<TSrc, TVal1>>, TVal1) vt1) where TSrc : IImmutable => WithPrivate.With(instance, vt1);
+    public static TSrc With<TSrc, TVal1, TVal2>(this TSrc instance, (Expression<Func<TSrc, TVal1>>, TVal1) vt1, (Expression<Func<TSrc, TVal2>>, TVal2) vt2) where TSrc : IImmutable => WithPrivate.With(instance, vt1, vt2);
+    public static TSrc With<TSrc, TVal1, TVal2, TVal3>(this TSrc instance, (Expression<Func<TSrc, TVal1>> , TVal1 ) vt1, (Expression<Func<TSrc, TVal2>> , TVal2 ) vt2, (Expression<Func<TSrc, TVal3>> , TVal3 ) vt3) where TSrc : IImmutable => WithPrivate.With(instance, vt1, vt2, vt3);
+    public static TSrc With<TSrc, TVal1, TVal2, TVal3, TVal4>(this TSrc instance, (Expression<Func<TSrc, TVal1>> , TVal1 ) vt1, (Expression<Func<TSrc, TVal2>> , TVal2 ) vt2, (Expression<Func<TSrc, TVal3>> , TVal3 ) vt3, (Expression<Func<TSrc, TVal4>> , TVal4 ) vt4) where TSrc : IImmutable => WithPrivate.With(instance, vt1, vt2, vt3, vt4);
+    public static TSrc With<TSrc, TVal1, TVal2, TVal3, TVal4, TVal5>(this TSrc instance, (Expression<Func<TSrc, TVal1>> , TVal1 ) vt1, (Expression<Func<TSrc, TVal2>> , TVal2 ) vt2, (Expression<Func<TSrc, TVal3>> , TVal3 ) vt3, (Expression<Func<TSrc, TVal4>> , TVal4 ) vt4, (Expression<Func<TSrc, TVal5>> , TVal5 ) vt5) where TSrc : IImmutable => WithPrivate.With(instance, vt1, vt2, vt3, vt4, vt5);
+    public static TSrc With<TSrc, TVal1, TVal2, TVal3, TVal4, TVal5, TVal6>(this TSrc instance, (Expression<Func<TSrc, TVal1>> , TVal1 ) vt1, (Expression<Func<TSrc, TVal2>> , TVal2 ) vt2, (Expression<Func<TSrc, TVal3>> , TVal3 ) vt3, (Expression<Func<TSrc, TVal4>> , TVal4 ) vt4, (Expression<Func<TSrc, TVal5>> , TVal5 ) vt5, (Expression<Func<TSrc, TVal6>> , TVal6 ) vt6) where TSrc : IImmutable => WithPrivate.With(instance, vt1, vt2, vt3, vt4, vt5, vt6);
+    public static TSrc With<TSrc, TVal1, TVal2, TVal3, TVal4, TVal5, TVal6, TVal7>(this TSrc instance, (Expression<Func<TSrc, TVal1>> , TVal1 ) vt1, (Expression<Func<TSrc, TVal2>> , TVal2 ) vt2, (Expression<Func<TSrc, TVal3>> , TVal3 ) vt3, (Expression<Func<TSrc, TVal4>> , TVal4 ) vt4, (Expression<Func<TSrc, TVal5>> , TVal5 ) vt5, (Expression<Func<TSrc, TVal6>> , TVal6 ) vt6, (Expression<Func<TSrc, TVal7>> , TVal7 ) vt7) where TSrc : IImmutable => WithPrivate.With(instance, vt1, vt2, vt3, vt4, vt5, vt6, vt7);
+    public static TSrc With<TSrc, TVal1, TVal2, TVal3, TVal4, TVal5, TVal6, TVal7, TVal8>(this TSrc instance, (Expression<Func<TSrc, TVal1>> , TVal1 ) vt1, (Expression<Func<TSrc, TVal2>> , TVal2 ) vt2, (Expression<Func<TSrc, TVal3>> , TVal3 ) vt3, (Expression<Func<TSrc, TVal4>> , TVal4 ) vt4, (Expression<Func<TSrc, TVal5>> , TVal5 ) vt5, (Expression<Func<TSrc, TVal6>> , TVal6 ) vt6, (Expression<Func<TSrc, TVal7>> , TVal7 ) vt7, (Expression<Func<TSrc, TVal8>> , TVal8 ) vt8) where TSrc : IImmutable => WithPrivate.With(instance, vt1, vt2, vt3, vt4, vt5, vt6, vt7, vt8);
+    public static TSrc With<TSrc, TVal1, TVal2, TVal3, TVal4, TVal5, TVal6, TVal7, TVal8, TVal9>(this TSrc instance, (Expression<Func<TSrc, TVal1>> , TVal1 ) vt1, (Expression<Func<TSrc, TVal2>> , TVal2 ) vt2, (Expression<Func<TSrc, TVal3>> , TVal3 ) vt3, (Expression<Func<TSrc, TVal4>> , TVal4 ) vt4, (Expression<Func<TSrc, TVal5>> , TVal5 ) vt5, (Expression<Func<TSrc, TVal6>> , TVal6 ) vt6, (Expression<Func<TSrc, TVal7>> , TVal7 ) vt7, (Expression<Func<TSrc, TVal8>> , TVal8 ) vt8, (Expression<Func<TSrc, TVal9>> , TVal9 ) vt9) where TSrc : IImmutable => WithPrivate.With(instance, vt1, vt2, vt3, vt4, vt5, vt6, vt7, vt8, vt9);
   }
-
 }
