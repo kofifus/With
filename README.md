@@ -13,7 +13,7 @@ public class Employee : IImmutable {
   public Employee(string firstName, string lastName) { FirstName = firstName; LastName = lastName; }
 }
 ```
-Note that parameter names in our constructor *must* match fields names except for the first letter which can have a different case (ie `firstName` for field `FirstName`) 
+Note that parameter names in our constructor *must* match fields names except for the first letter which can have a different case (ie `firstName` for field `FirstName`)
 
 Apply modification:
 
