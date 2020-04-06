@@ -10,9 +10,7 @@ using System.Runtime.CompilerServices;
 namespace System.Immutable
 {
   // Inheriting IImmutable declares the class as immutable
-  // That is once constructed:
-  // - all public fields will always return the same values
-  // - all public getters will always return the same values
+  // That is, once constructed, all public fields and getters will always return the same values
   public interface IImmutable { };
 }
 
